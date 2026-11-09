@@ -59,6 +59,52 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
     );
   });
 
+  it.effect("leaves API-key processes on the SDK or CLI default entrypoint", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homePath = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-api-" });
+      const host = { CLAUDE_CODE_ENTRYPOINT: "claude-desktop", KEEP: "1" };
+      const apiKey = { name: "ANTHROPIC_API_KEY", value: "test-key", sensitive: true };
+
+      for (const [instance, environment] of [
+        [[apiKey], host],
+        [undefined, { ...host, ANTHROPIC_API_KEY: apiKey.value }],
+      ] as const) {
+        expect(yield* mergeClaudeProcessEnvironment({ homePath }, instance, environment)).toEqual({
+          KEEP: "1",
+          ANTHROPIC_API_KEY: apiKey.value,
+        });
+        expect(
+          (yield* mergeClaudeProcessEnvironment(
+            { homePath },
+            [
+              ...(instance ?? []),
+              { name: "CLAUDE_CODE_ENTRYPOINT", value: "custom", sensitive: false },
+            ],
+            environment,
+          )).CLAUDE_CODE_ENTRYPOINT,
+        ).toBe("custom");
+      }
+
+      yield* fileSystem.writeFileString(
+        path.join(homePath, "settings.json"),
+        JSON.stringify({ env: { ANTHROPIC_API_KEY: apiKey.value } }),
+      );
+      expect(yield* mergeClaudeProcessEnvironment({ homePath }, undefined, host)).toEqual({
+        KEEP: "1",
+      });
+
+      yield* fileSystem.writeFileString(
+        path.join(homePath, "settings.json"),
+        JSON.stringify({ env: { ANTHROPIC_API_KEY: "" } }),
+      );
+      expect(
+        (yield* mergeClaudeProcessEnvironment({ homePath }, [apiKey], host)).CLAUDE_CODE_ENTRYPOINT,
+      ).toBe("t3-code");
+    }),
+  );
+
   it.effect(
     "drops the launching Claude session and Electron's run-as-Node flag, and labels processes t3-code unless overridden",
     () =>

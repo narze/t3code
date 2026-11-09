@@ -60,6 +60,7 @@ const CLAUDE_HOST_SESSION_VARIABLES = [
   "CLAUDE_EFFORT",
   "CLAUDE_PID",
   "CLAUDE_AGENT_SDK_VERSION",
+  "CLAUDE_CODE_ENTRYPOINT",
 ];
 
 /**
@@ -71,20 +72,20 @@ export const mergeClaudeProcessEnvironment = Effect.fn("mergeClaudeProcessEnviro
   instanceEnvironment: ProviderInstanceEnvironment | undefined,
   hostEnvironment: NodeJS.ProcessEnv,
 ) {
-  const baseEnvironment: NodeJS.ProcessEnv = {
-    ...hostEnvironment,
-    CLAUDE_CODE_ENTRYPOINT: "t3-code",
-  };
+  const baseEnvironment: NodeJS.ProcessEnv = { ...hostEnvironment };
   for (const name of CLAUDE_HOST_SESSION_VARIABLES) delete baseEnvironment[name];
   // The desktop runs the server as Node through Electron. Commands Claude runs inherit its env, so
   // an Electron app they start (T3 Code itself, VS Code) would run as Node and exit.
   delete baseEnvironment.ELECTRON_RUN_AS_NODE;
   const environment = yield* mergeProviderInstanceEnvironment(instanceEnvironment, baseEnvironment);
-  const settingsEntrypoint = (yield* readClaudeSettingsEnv(config, undefined, environment))
-    .CLAUDE_CODE_ENTRYPOINT;
-  return settingsEntrypoint
-    ? { ...environment, CLAUDE_CODE_ENTRYPOINT: settingsEntrypoint }
-    : environment;
+  const settingsEnv = yield* readClaudeSettingsEnv(config, undefined, environment);
+  // Anthropic rejects subscriber API credits with t3-code; API keys need the SDK/CLI default.
+  const apiKey = settingsEnv.ANTHROPIC_API_KEY ?? environment.ANTHROPIC_API_KEY;
+  const entrypoint =
+    settingsEnv.CLAUDE_CODE_ENTRYPOINT ||
+    environment.CLAUDE_CODE_ENTRYPOINT ||
+    (apiKey?.trim() ? undefined : "t3-code");
+  return entrypoint ? { ...environment, CLAUDE_CODE_ENTRYPOINT: entrypoint } : environment;
 });
 
 /** managed-mcp.json excludes other MCP config and forbids --strict-mcp-config; omit the flag when present. */
